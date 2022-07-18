@@ -52,7 +52,7 @@ class BCDDateTimeRegister:
         week
     """
 
-    def __init__(self, register_address, weekday_first=True, weekday_start=1):
+    def __init__(self, register_address, weekday_first=True, weekday_start=1, include_weekday=True):
         self.buffer = bytearray(8)
         self.buffer[0] = register_address
         if weekday_first:
@@ -60,6 +60,7 @@ class BCDDateTimeRegister:
         else:
             self.weekday_offset = 1
         self.weekday_start = weekday_start
+        self.include_weekday = include_weekday
         # Masking value list   n/a  sec min hr day wkday mon year
         self.mask_datetime = b"\xFF\x7F\x7F\x3F\x3F\x07\x1F\xFF"
 
@@ -67,6 +68,13 @@ class BCDDateTimeRegister:
         # Read and return the date and time.
         with obj.i2c_device as i2c:
             i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+
+        if not self.include_weekday:
+            """If no weekday, insert a dummy value in its place and shift the other values to the right"""
+            self.buffer = (self.buffer[:4+self.weekday_offset]
+                           + b"\x00"
+                           + self.buffer[4+self.weekday_offset:])
+
         return time.struct_time(
             (
                 _bcd2bin(self.buffer[7] & self.mask_datetime[7]) + 2000,
@@ -94,5 +102,11 @@ class BCDDateTimeRegister:
         self.buffer[5 - self.weekday_offset] = _bin2bcd(value.tm_mday)
         self.buffer[6] = _bin2bcd(value.tm_mon)
         self.buffer[7] = _bin2bcd(value.tm_year - 2000)
+
+        if not self.include_weekday:
+            """If no weekday, remove it and shift other values over"""
+            self.buffer = (self.buffer[:4+self.weekday_offset]
+                           + self.buffer[5+self.weekday_offset:])
+
         with obj.i2c_device:
             obj.i2c_device.write(self.buffer)
